@@ -15,9 +15,15 @@
 # include <mutex>
 # include <boost/fiber/detail/spinlock_ttas.hpp>
 # include <boost/fiber/detail/spinlock_ttas_adaptive.hpp>
+# include <boost/fiber/detail/spinlock_ttas_hle.hpp>
 # if defined(BOOST_FIBERS_HAS_FUTEX)
 #  include <boost/fiber/detail/spinlock_ttas_futex.hpp>
 #  include <boost/fiber/detail/spinlock_ttas_adaptive_futex.hpp>
+# endif
+# if defined(BOOST_USE_TSX)
+#  include <boost/fiber/detail/spinlock_ttas_hle.hpp>
+#  include <boost/fiber/detail/spinlock_ttas_adaptive_hle.hpp>
+#  include <boost/fiber/detail/spinlock_ttas_rtm.hpp>
 # endif
 #endif
 
@@ -50,6 +56,15 @@ using spinlock = spinlock_ttas_futex;
 using spinlock = spinlock_ttas_adaptive_futex;
 # elif defined(BOOST_FIBERS_SPINLOCK_TTAS_ADAPTIVE) 
 using spinlock = spinlock_ttas_adaptive;
+# elif (defined(BOOST_USE_TSX) && \
+        defined(BOOST_FIBERS_SPINLOCK_TTAS_HLE))
+using spinlock = spinlock_ttas_hle;
+# elif (defined(BOOST_USE_TSX) && \
+        defined(BOOST_FIBERS_SPINLOCK_TTAS_ADAPTIVE_HLE))
+using spinlock = spinlock_ttas_adaptive_hle;
+# elif (defined(BOOST_USE_TSX) && \
+        defined(BOOST_FIBERS_SPINLOCK_TTAS_RTM))
+using spinlock = spinlock_ttas_rtm;
 # else
 using spinlock = spinlock_ttas;
 # endif
