@@ -22,11 +22,7 @@
 #if defined(BOOST_NO_CXX17_STD_APPLY)
 #include <boost/context/detail/apply.hpp>
 #endif
-#if (BOOST_EXECUTION_CONTEXT==1)
-# include <boost/context/execution_context.hpp>
-#else
-# include <boost/context/continuation.hpp>
-#endif
+#include <boost/context/continuation.hpp>
 #include <boost/context/stack_context.hpp>
 #include <boost/intrusive/list.hpp>
 #include <boost/intrusive/parent_from_member.hpp>
@@ -39,6 +35,7 @@
 #include <boost/fiber/detail/decay_copy.hpp>
 #include <boost/fiber/detail/fss.hpp>
 #include <boost/fiber/detail/spinlock.hpp>
+#include <boost/fiber/detail/wait_list.hpp>
 #include <boost/fiber/detail/wrap.hpp>
 #include <boost/fiber/exceptions.hpp>
 #include <boost/fiber/fixedsize_stack.hpp>
@@ -65,39 +62,6 @@ class scheduler;
 
 namespace detail {
 
-struct wait_tag;
-typedef intrusive::slist_member_hook<
-    intrusive::tag< wait_tag >,
-    intrusive::link_mode<
-        intrusive::safe_link
-    >
->                                 wait_hook;
-// declaration of the functor that converts between
-// the context class and the wait-hook
-struct wait_functor {
-    // required types
-    typedef wait_hook               hook_type;
-    typedef hook_type           *   hook_ptr;
-    typedef const hook_type     *   const_hook_ptr;
-    typedef context                 value_type;
-    typedef value_type          *   pointer;
-    typedef const value_type    *   const_pointer;
-
-    // required static functions
-    static hook_ptr to_hook_ptr( value_type &value);
-    static const_hook_ptr to_hook_ptr( value_type const& value);
-    static pointer to_value_ptr( hook_ptr n);
-    static const_pointer to_value_ptr( const_hook_ptr n);
-};
-
-struct ready_tag;
-typedef intrusive::list_member_hook<
-    intrusive::tag< ready_tag >,
-    intrusive::link_mode<
-        intrusive::auto_unlink
-    >
->                                       ready_hook;
-
 struct sleep_tag;
 typedef intrusive::set_member_hook<
     intrusive::tag< sleep_tag >,
@@ -105,30 +69,6 @@ typedef intrusive::set_member_hook<
         intrusive::auto_unlink
     >
 >                                       sleep_hook;
-
-struct worker_tag;
-typedef intrusive::list_member_hook<
-    intrusive::tag< worker_tag >,
-    intrusive::link_mode<
-        intrusive::auto_unlink
-    >
->                                       worker_hook;
-
-struct terminated_tag;
-typedef intrusive::slist_member_hook<
-    intrusive::tag< terminated_tag >,
-    intrusive::link_mode<
-        intrusive::safe_link
-    >
->                                       terminated_hook;
-
-struct remote_ready_tag;
-typedef intrusive::slist_member_hook<
-    intrusive::tag< remote_ready_tag >,
-    intrusive::link_mode<
-        intrusive::safe_link
-    >
->                                       remote_ready_hook;
 
 }
 
@@ -143,12 +83,7 @@ const worker_context_t worker_context{};
 
 class BOOST_FIBERS_DECL context {
 public:
-    typedef intrusive::slist<
-                context,
-                intrusive::function_hook< detail::wait_functor >,
-                intrusive::linear< true >,
-                intrusive::cache_last< true > 
-            >   wait_queue_t;
+    typedef detail::wait_list< context >    wait_queue_t;
 
 private:
     friend class scheduler;
@@ -174,63 +109,33 @@ private:
 
     typedef std::map< uintptr_t, fss_data >             fss_data_t;
 
-#if ! defined(BOOST_FIBERS_NO_ATOMICS)
-    std::atomic< std::size_t > use_count_{ 0 };
-#else
-    std::size_t                use_count_{ 0 };
-#endif
-#if ! defined(BOOST_FIBERS_NO_ATOMICS)
-    detail::remote_ready_hook  remote_ready_hook_{};
-    std::atomic< context * >                            remote_nxt_{ nullptr };
-#endif
-    detail::spinlock           splk_{};
-    bool                                                terminated_{ false };
-    wait_queue_t                                        wait_queue_{};
 public:
-    detail::wait_hook                                   wait_hook_{};
-private:
-    scheduler              *   scheduler_{ nullptr };
-    fss_data_t                                          fss_data_{};
-    detail::sleep_hook                                  sleep_hook_{};
-    detail::ready_hook                                  ready_hook_{};
-    detail::terminated_hook                             terminated_hook_{};
-    detail::worker_hook                                 worker_hook_{};
-#if (BOOST_EXECUTION_CONTEXT==1)
-    boost::context::execution_context                   ctx_;
-#else
-    boost::context::continuation                        c_;
-#endif
-    fiber_properties                                *   properties_{ nullptr };
-    std::chrono::steady_clock::time_point               tp_{ (std::chrono::steady_clock::time_point::max)() };
+    std::atomic< std::size_t >                          use_count_;
     type                                                type_;
     launch                                              policy_;
+    boost::context::continuation                        c_;
+    detail::spinlock                                    splk_{};
+    bool                                                terminated_{ false };
+    fss_data_t                                          fss_data_{};
+    scheduler                                       *   scheduler_{ nullptr };
+    context                                         *   ready_prev{ nullptr };
+    context                                         *   ready_next{ nullptr };
+    context                                         *   remote_ready_prev{ nullptr };
+    context                                         *   remote_ready_next{ nullptr };
+    context                                         *   worker_prev{ nullptr };
+    context                                         *   worker_next{ nullptr };
+    context                                         *   terminated_prev{ nullptr };
+    context                                         *   terminated_next{ nullptr };
+    context                                         *   wait_prev{ nullptr };
+    context                                         *   wait_next{ nullptr };
+    fiber_properties                                *   properties_{ nullptr };
+    wait_queue_t                                        wait_queue_{};
+    std::chrono::steady_clock::time_point               tp_{ (std::chrono::steady_clock::time_point::max)() };
+    detail::sleep_hook                                  sleep_hook_{};
 
     void resume_( detail::data_t &) noexcept;
     void schedule_( context *) noexcept;
 
-#if (BOOST_EXECUTION_CONTEXT==1)
-    template< typename Fn, typename Tpl >
-    void run_( Fn && fn_, Tpl && tpl_, detail::data_t * dp) noexcept {
-        {
-            // fn and tpl must be destroyed before calling terminate()
-            typename std::decay< Fn >::type fn = std::forward< Fn >( fn_);
-            typename std::decay< Tpl >::type tpl = std::forward< Tpl >( tpl_);
-            if ( nullptr != dp->lk) {
-                dp->lk->unlock();
-            } else if ( nullptr != dp->ctx) {
-                active()->schedule_( dp->ctx);
-            }
-# if defined(BOOST_NO_CXX17_STD_APPLY)
-            boost::context::detail::apply( std::move( fn), std::move( tpl) );
-# else
-            std::apply( std::move( fn), std::move( tpl) );
-# endif
-        }
-        // terminate context
-        terminate();
-        BOOST_ASSERT_MSG( false, "fiber already terminated");
-    }
-#else
     template< typename Fn, typename Tpl >
     boost::context::continuation
     run_( boost::context::continuation && c, Fn && fn_, Tpl && tpl_) noexcept {
@@ -256,7 +161,6 @@ private:
         // terminate context
         return terminate();
     }
-#endif
 
 public:
     class id {
@@ -334,37 +238,11 @@ public:
              boost::context::preallocated palloc, StackAlloc salloc,
              Fn && fn, Tpl && tpl) :
         use_count_{ 1 }, // fiber instance or scheduler owner
-#if (BOOST_EXECUTION_CONTEXT==1)
+        type_{ type::worker_context },
+        policy_{ policy },
+        c_{
 # if defined(BOOST_NO_CXX14_GENERIC_LAMBDAS)
-        ctx_{ std::allocator_arg, palloc, salloc,
-              detail::wrap(
-                  [this]( typename std::decay< Fn >::type & fn, typename std::decay< Tpl >::type & tpl,
-                          boost::context::execution_context & ctx, void * vp) mutable noexcept {
-                        run_( std::move( fn), std::move( tpl), static_cast< detail::data_t * >( vp) );
-                  },
-                  std::forward< Fn >( fn),
-                  std::forward< Tpl >( tpl),
-                  boost::context::execution_context::current() )
-              },
-        type_{ type::worker_context },
-        policy_{ policy }
-# else
-        ctx_{ std::allocator_arg, palloc, salloc,
-              [this,fn=detail::decay_copy( std::forward< Fn >( fn) ),tpl=std::forward< Tpl >( tpl),
-               ctx=boost::context::execution_context::current()] (void * vp) mutable noexcept {
-                    run_( std::move( fn), std::move( tpl), static_cast< detail::data_t * >( vp) );
-              }},
-        type_{ type::worker_context },
-        policy_{ policy }
-# endif
-        {}
-#else
-        c_{},
-        type_{ type::worker_context },
-        policy_{ policy }
-        {
-# if defined(BOOST_NO_CXX14_GENERIC_LAMBDAS)
-            c_ = boost::context::callcc(
+            boost::context::callcc(
                     std::allocator_arg, palloc, salloc,
                       detail::wrap(
                           [this]( typename std::decay< Fn >::type & fn, typename std::decay< Tpl >::type & tpl,
@@ -372,17 +250,17 @@ public:
                                 return run_( std::forward< boost::context::continuation >( c), std::move( fn), std::move( tpl) );
                           },
                           std::forward< Fn >( fn),
-                          std::forward< Tpl >( tpl) ) );
+                          std::forward< Tpl >( tpl) ) )
 # else
-            c_ = boost::context::callcc(
+            boost::context::callcc(
                     std::allocator_arg, palloc, salloc,
                     [this,fn=detail::decay_copy( std::forward< Fn >( fn) ),tpl=std::forward< Tpl >( tpl)]
                     (boost::context::continuation && c) mutable noexcept {
                           return run_( std::forward< boost::context::continuation >( c), std::move( fn), std::move( tpl) );
-                    });
+                    })
 # endif
-        }
-#endif
+        } {
+    }
 
     context( context const&) = delete;
     context & operator=( context const&) = delete;
@@ -401,11 +279,7 @@ public:
     id get_id() const noexcept;
 
     bool is_resumable() const noexcept {
-#if (BOOST_EXECUTION_CONTEXT==1)
-        if ( ctx_) return true;
-#else
         if ( c_) return true;
-#endif
         else return false;
     }
 
@@ -416,12 +290,8 @@ public:
     void suspend() noexcept;
     void suspend( detail::spinlock_lock &) noexcept;
 
-#if (BOOST_EXECUTION_CONTEXT==1)
-    void terminate() noexcept;
-#else
     boost::context::continuation suspend_with_cc() noexcept;
     boost::context::continuation terminate() noexcept;
-#endif
 
     void join();
 
@@ -455,38 +325,7 @@ public:
         return policy_;
     }
 
-    bool worker_is_linked() const noexcept;
-
-    bool ready_is_linked() const noexcept;
-
-    bool remote_ready_is_linked() const noexcept;
-
     bool sleep_is_linked() const noexcept;
-
-    bool terminated_is_linked() const noexcept;
-
-    bool wait_is_linked() const noexcept;
-
-    template< typename List >
-    void worker_link( List & lst) noexcept {
-        static_assert( std::is_same< typename List::value_traits::hook_type, detail::worker_hook >::value, "not a worker-queue");
-        BOOST_ASSERT( ! worker_is_linked() );
-        lst.push_back( * this);
-    }
-
-    template< typename List >
-    void ready_link( List & lst) noexcept {
-        static_assert( std::is_same< typename List::value_traits::hook_type, detail::ready_hook >::value, "not a ready-queue");
-        BOOST_ASSERT( ! ready_is_linked() );
-        lst.push_back( * this);
-    }
-
-    template< typename List >
-    void remote_ready_link( List & lst) noexcept {
-        static_assert( std::is_same< typename List::value_traits::hook_type, detail::remote_ready_hook >::value, "not a remote-ready-queue");
-        BOOST_ASSERT( ! remote_ready_is_linked() );
-        lst.push_back( * this);
-    }
 
     template< typename Set >
     void sleep_link( Set & set) noexcept {
@@ -494,24 +333,6 @@ public:
         BOOST_ASSERT( ! sleep_is_linked() );
         set.insert( * this);
     }
-
-    template< typename List >
-    void terminated_link( List & lst) noexcept {
-        static_assert( std::is_same< typename List::value_traits::hook_type, detail::terminated_hook >::value, "not a terminated-queue");
-        BOOST_ASSERT( ! terminated_is_linked() );
-        lst.push_back( * this);
-    }
-
-    template< typename List >
-    void wait_link( List & lst) noexcept {
-        static_assert( std::is_same< typename List::value_traits::hook_type, detail::wait_hook >::value, "not a wait-queue");
-        BOOST_ASSERT( ! wait_is_linked() );
-        lst.push_back( * this);
-    }
-
-    void worker_unlink() noexcept;
-
-    void ready_unlink() noexcept;
 
     void sleep_unlink() noexcept;
 
@@ -528,18 +349,13 @@ public:
         BOOST_ASSERT( nullptr != ctx);
         if ( 1 == ctx->use_count_.fetch_sub( 1, std::memory_order_release) ) {
             std::atomic_thread_fence( std::memory_order_acquire);
-#if (BOOST_EXECUTION_CONTEXT==1)
-            boost::context::execution_context ec = ctx->ctx_;
-            // destruct context
-            // deallocates stack (execution_context is ref counted)
-            ctx->~context();
-#else
             boost::context::continuation c = std::move( ctx->c_);
             // destruct context
             ctx->~context();
+            boost::fibers::context * from =  boost::fibers::context::active();
+            detail::data_t d{ from };
             // deallocated stack
-            c.resume( nullptr);
-#endif
+            c.resume( & d);
         }
     }
 };
@@ -581,29 +397,7 @@ static intrusive_ptr< context > make_worker_context( launch policy,
                 std::make_tuple( std::forward< Args >( args) ... ) } };
 }
 
-namespace detail {
-
-inline
-wait_functor::hook_ptr wait_functor::to_hook_ptr( wait_functor::value_type & value) {
-    return & value.wait_hook_;
-}
-
-inline
-wait_functor::const_hook_ptr wait_functor::to_hook_ptr( wait_functor::value_type const& value) {
-    return & value.wait_hook_;
-}
-
-inline
-wait_functor::pointer wait_functor::to_value_ptr( wait_functor::hook_ptr n) {
-    return intrusive::get_parent_from_member< context >( n, & context::wait_hook_);
-}
-
-inline
-wait_functor::const_pointer wait_functor::to_value_ptr( wait_functor::const_hook_ptr n) {
-    return intrusive::get_parent_from_member< context >( n, & context::wait_hook_);
-}
-
-}}}
+}}
 
 #ifdef _MSC_VER
 # pragma warning(pop)

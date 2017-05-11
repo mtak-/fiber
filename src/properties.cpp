@@ -27,10 +27,8 @@ fiber_properties::notify() noexcept {
     // in the sched_algorithm's ready queue. Don't bother the sched_algorithm
     // with a change to a fiber it's not currently tracking: it will do the
     // right thing next time the fiber is passed to its awakened() method.
-    if ( ctx_->ready_is_linked() ) {
         static_cast< algo::algorithm_with_properties_base * >( algo_)->
             property_change_( ctx_, this);
-    }
 }
 
 }}                                  // boost::fibers

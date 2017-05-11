@@ -19,13 +19,11 @@ void
 condition_variable_any::notify_one() noexcept {
     // get one context' from wait-queue
     detail::spinlock_lock lk{ wait_queue_splk_ };
-    if ( wait_queue_.empty() ) {
-        return;
+    context * ctx = wait_queue_.pop();
+    if ( nullptr != ctx) {
+        // notify context
+        context::active()->schedule( ctx);
     }
-    context * ctx = & wait_queue_.front();
-    wait_queue_.pop_front();
-    // notify context
-    context::active()->schedule( ctx);
 }
 
 void
@@ -34,9 +32,9 @@ condition_variable_any::notify_all() noexcept {
     detail::spinlock_lock lk{ wait_queue_splk_ };
     // FIXME : swap wait-queue and unlock lock
     // notify all context'
-    while ( ! wait_queue_.empty() ) {
-        context * ctx = & wait_queue_.front();
-        wait_queue_.pop_front();
+    context * ctx = nullptr;
+    while ( nullptr != ( ctx = wait_queue_.pop() ) ) {
+        // notify context
         context::active()->schedule( ctx);
     }
 }
