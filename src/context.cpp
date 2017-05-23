@@ -146,20 +146,14 @@ context::context( dispatcher_context_t, boost::context::preallocated const& pall
 context::~context() {
     // protect for concurrent access
     std::unique_lock< detail::spinlock > lk{ splk_ };
-    BOOST_ASSERT( ! ready_is_linked() );
-    BOOST_ASSERT( ! remote_ready_is_linked() );
-    BOOST_ASSERT( ! sleep_is_linked() );
-    BOOST_ASSERT( ! wait_is_linked() );
     if ( is_context( type::dispatcher_context) ) {
         // dispatcher-context is resumed by main-context
         // while the scheduler is deconstructed
 #ifdef BOOST_DISABLE_ASSERTS
-        wait_queue_.pop_front();
+        wait_queue_.pop();
 #else
-        context * ctx = & wait_queue_.front();
-        wait_queue_.pop_front();
+        context * ctx = wait_queue_.pop();
         BOOST_ASSERT( ctx->is_context( type::main_context) );
-        BOOST_ASSERT( nullptr == active() );
 #endif
     }
     BOOST_ASSERT( wait_queue_.empty() );
@@ -222,7 +216,7 @@ context::join() {
         // push active context to wait-queue, member
         // of the context which has to be joined by
         // the active context
-        active_ctx->wait_link( wait_queue_);
+        wait_queue_.push( active_ctx);
         // suspend active context
         active_ctx->get_scheduler()->suspend( lk);
         // active context resumed
@@ -254,10 +248,8 @@ context::terminate() noexcept {
     // mark as terminated
     terminated_ = true;
     // notify all waiting fibers
-    while ( ! wait_queue_.empty() ) {
-        context * ctx = & wait_queue_.front();
-        // remove fiber from wait-queue
-        wait_queue_.pop_front();
+    context * ctx = nullptr;
+    while ( nullptr != ( ctx = wait_queue_.pop() ) ) {
         // notify scheduler
         schedule( ctx);
     }
@@ -349,54 +341,6 @@ void
 context::set_properties( fiber_properties * props) noexcept {
     delete properties_;
     properties_ = props;
-}
-
-bool
-context::worker_is_linked() const noexcept {
-    return worker_hook_.is_linked();
-}
-
-bool
-context::ready_is_linked() const noexcept {
-    return ready_hook_.is_linked();
-}
-
-bool
-context::remote_ready_is_linked() const noexcept {
-    return remote_ready_hook_.is_linked();
-}
-
-bool
-context::sleep_is_linked() const noexcept {
-    return sleep_hook_.is_linked();
-}
-
-bool
-context::terminated_is_linked() const noexcept {
-    return terminated_hook_.is_linked();
-}
-
-bool
-context::wait_is_linked() const noexcept {
-    return wait_hook_.is_linked();
-}
-
-void
-context::worker_unlink() noexcept {
-    BOOST_ASSERT( worker_is_linked() );
-    worker_hook_.unlink();
-}
-
-void
-context::ready_unlink() noexcept {
-    BOOST_ASSERT( ready_is_linked() );
-    ready_hook_.unlink();
-}
-
-void
-context::sleep_unlink() noexcept {
-    BOOST_ASSERT( sleep_is_linked() );
-    sleep_hook_.unlink();
 }
 
 void

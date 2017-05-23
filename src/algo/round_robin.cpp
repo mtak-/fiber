@@ -19,19 +19,14 @@ namespace algo {
 void
 round_robin::awakened( context * ctx) noexcept {
     BOOST_ASSERT( nullptr != ctx);
-    BOOST_ASSERT( ! ctx->ready_is_linked() );
     BOOST_ASSERT( ctx->is_resumable() );
-    ctx->ready_link( rqueue_);
+    rqueue_.push( ctx);
 }
 
 context *
 round_robin::pick_next() noexcept {
     context * victim = nullptr;
-    if ( ! rqueue_.empty() ) {
-        victim = & rqueue_.front();
-        rqueue_.pop_front();
-        BOOST_ASSERT( nullptr != victim);
-        BOOST_ASSERT( ! victim->ready_is_linked() );
+    if ( nullptr != ( victim = rqueue_.pop() ) ) {
         BOOST_ASSERT( victim->is_resumable() );
     }
     return victim;

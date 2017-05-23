@@ -100,20 +100,17 @@ public:
 
     void awakened( context * ctx) noexcept {
         BOOST_ASSERT( nullptr != ctx);
-        BOOST_ASSERT( ! ctx->ready_is_linked() );
-        ctx->ready_link( rqueue_); /*< fiber, enqueue on ready queue >*/
+        rqueue_.push( ctx); /*< fiber, enqueue on ready queue >*/
         if ( ! ctx->is_context( boost::fibers::type::dispatcher_context) ) {
             ++counter_;
         }
     }
 
     context * pick_next() noexcept {
-        context * ctx( nullptr);
-        if ( ! rqueue_.empty() ) { /*<
+        context * ctx = nullptr;
+        if ( nullptr != ( ctx = rqueue_.pop() ) ) { /*<
             pop an item from the ready queue
         >*/
-            ctx = & rqueue_.front();
-            rqueue_.pop_front();
             BOOST_ASSERT( nullptr != ctx);
             BOOST_ASSERT( context::active() != ctx);
             if ( ! ctx->is_context( boost::fibers::type::dispatcher_context) ) {

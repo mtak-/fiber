@@ -26,7 +26,7 @@ shared_work::awakened( context * ctx) noexcept {
             implicit library helper fiber): never put those on the shared
             queue
         >*/
-        lqueue_.push_back( * ctx);
+        lqueue_.push( ctx);
     } else {
         ctx->detach();
         std::unique_lock< std::mutex > lk{ rqueue_mtx_ }; /*<
@@ -55,12 +55,9 @@ shared_work::pick_next() noexcept {
         >*/
     } else {
         lk.unlock();
-        if ( ! lqueue_.empty() ) { /*<
+        ctx = lqueue_.pop(); /*<
                 nothing in the ready queue, return main or dispatcher fiber
             >*/
-            ctx = & lqueue_.front();
-            lqueue_.pop_front();
-        }
     }
     return ctx;
 }
