@@ -106,7 +106,6 @@ public:
 #if ! defined(BOOST_FIBERS_NO_ATOMICS)
     context                                 *   remote_ready_prev{ nullptr };
     context                                 *   remote_ready_next{ nullptr };
-    std::atomic< context * >                    remote_nxt_{ nullptr };
 #endif
     detail::spinlock                            splk_{};
     bool                                        terminated_{ false };
