@@ -100,7 +100,10 @@ public:
         // store this fiber in waiting-queue
         detail::spinlock_lock lk{ wait_queue_splk_ };
         BOOST_ASSERT( ! active_ctx->wait_is_linked() );
+        BOOST_ASSERT( nullptr == active_ctx->wait_splk_);
+        BOOST_ASSERT( nullptr == active_ctx->sleep_splk_);
         active_ctx->wait_link( wait_queue_);
+        active_ctx->wait_splk_ = & wait_queue_splk_;
         // unlock external lt
         lt.unlock();
         // suspend this fiber

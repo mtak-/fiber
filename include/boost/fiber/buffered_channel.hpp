@@ -218,7 +218,10 @@ public:
             if ( BOOST_UNLIKELY( is_closed_() ) ) {
                 return channel_op_status::closed;
             } else if ( is_full_() ) {
+                BOOST_ASSERT( nullptr == active_ctx->wait_splk_);
+                BOOST_ASSERT( nullptr == active_ctx->sleep_splk_);
                 active_ctx->wait_link( waiting_producers_);
+                active_ctx->wait_splk_ = & splk_;
                 // suspend this producer
                 if ( ! active_ctx->wait_until( timeout_time, lk) ) {
                     // relock local lk
@@ -252,7 +255,10 @@ public:
             if ( BOOST_UNLIKELY( is_closed_() ) ) {
                 return channel_op_status::closed;
             } else if ( is_full_() ) {
+                BOOST_ASSERT( nullptr == active_ctx->wait_splk_);
+                BOOST_ASSERT( nullptr == active_ctx->sleep_splk_);
                 active_ctx->wait_link( waiting_producers_);
+                active_ctx->wait_splk_ = & splk_;
                 // suspend this producer
                 if ( ! active_ctx->wait_until( timeout_time, lk) ) {
                     // relock local lk
@@ -371,7 +377,10 @@ public:
                 if ( BOOST_UNLIKELY( is_closed_() ) ) {
                     return channel_op_status::closed;
                 } else {
+                    BOOST_ASSERT( nullptr == active_ctx->wait_splk_);
+                    BOOST_ASSERT( nullptr == active_ctx->sleep_splk_);
                     active_ctx->wait_link( waiting_consumers_);
+                    active_ctx->wait_splk_ = & splk_;
                     // suspend this consumer
                     if ( ! active_ctx->wait_until( timeout_time, lk) ) {
                         // relock local lk

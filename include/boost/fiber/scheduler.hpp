@@ -89,6 +89,7 @@ private:
     algo::algorithm::ptr_t             algo_;
     // sleep-queue contains context' which have been called
     // scheduler::wait_until()
+    detail::spinlock                                            sleep_splk_{};
     sleep_queue_type                                            sleep_queue_{};
     // worker-queue contains all context' mananged by this scheduler
     // except main-context and dispatcher-context

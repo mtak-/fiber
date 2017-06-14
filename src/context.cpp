@@ -279,6 +279,8 @@ context::schedule( context * ctx) noexcept {
     BOOST_ASSERT( this != ctx);
     BOOST_ASSERT( nullptr != get_scheduler() );
     BOOST_ASSERT( nullptr != ctx->get_scheduler() );
+    BOOST_ASSERT( nullptr == ctx->sleep_splk_);
+    BOOST_ASSERT( nullptr == ctx->wait_splk_);
 #if ! defined(BOOST_FIBERS_NO_ATOMICS)
     // FIXME: comparing scheduler address' must be synchronized?
     //        what if ctx is migrated between threads

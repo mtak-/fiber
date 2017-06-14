@@ -75,7 +75,9 @@ scheduler::sleep2ready_() noexcept {
     // move context which the deadline has reached
     // to ready-queue
     // sleep-queue is sorted (ascending)
+loop:
     std::chrono::steady_clock::time_point now = std::chrono::steady_clock::now();
+    detail::spinlock_lock lk{ sleep_splk_ };
     sleep_queue_type::iterator e = sleep_queue_.end();
     for ( sleep_queue_type::iterator i = sleep_queue_.begin(); i != e;) {
         context * ctx = & ( * i);
@@ -89,17 +91,29 @@ scheduler::sleep2ready_() noexcept {
         BOOST_ASSERT( ! ctx->terminated_is_linked() );
         // set fiber to state_ready if deadline was reached
         if ( ctx->tp_ <= now) {
+            // timed-wait op., context is part of wait- and sleep-queue
+            if ( nullptr != ctx->wait_splk_) {
+                if ( ! ctx->wait_splk_->try_lock() ) {
+                    // could not lock wait-lock, then unlock and redo
+                    lk.unlock();
+                    goto loop;
+                }
+                // remove context from wait-queue
+                if ( ctx->wait_is_linked() ) {
+                    ctx->wait_unlink();
+                }
+                // unlock wait-lock
+                ctx->wait_splk_->unlock();
+            }
             // remove context from sleep-queue
             i = sleep_queue_.erase( i);
             // reset sleep-tp
             ctx->tp_ = (std::chrono::steady_clock::time_point::max)();
-            // if context' was waiting on an object and
-            // op. has timed out, remove it from waiting-queue
-            if ( ctx->wait_is_linked() ) {
-                // remove context from wait-queue
-                ctx->wait_unlink();
-            }
-            // push new context to ready-queue
+            // reset wait-spinlock
+            ctx->wait_splk_ = nullptr;
+            // reset sleep-spinlock
+            ctx->sleep_splk_ = nullptr;
+            // push context to ready-queue
             algo_->awakened( ctx);
         } else {
             break; // first context with now < deadline
@@ -182,10 +196,12 @@ scheduler::dispatch() noexcept {
             std::chrono::steady_clock::time_point suspend_time =
                     (std::chrono::steady_clock::time_point::max)();
             // get lowest deadline from sleep-queue
+            detail::spinlock_lock lk{ sleep_splk_ };
             sleep_queue_type::iterator i = sleep_queue_.begin();
             if ( sleep_queue_.end() != i) {
                 suspend_time = i->tp_;
             }
+            lk.unlock();
             // no ready context, wait till signaled
             algo_->suspend_until( suspend_time);
         }
@@ -295,7 +311,12 @@ scheduler::wait_until( context * ctx,
     BOOST_ASSERT( ! ctx->terminated_is_linked() );
     BOOST_ASSERT( ! ctx->wait_is_linked() );
     ctx->tp_ = sleep_tp;
-    ctx->sleep_link( sleep_queue_);
+    {
+        detail::spinlock_lock lk{ sleep_splk_ };
+        BOOST_ASSERT( nullptr == ctx->sleep_splk_);
+        ctx->sleep_link( sleep_queue_);
+        ctx->sleep_splk_ = & sleep_splk_;
+    }
     // resume another context
     algo_->pick_next()->resume();
     // context has been resumed
@@ -320,7 +341,12 @@ scheduler::wait_until( context * ctx,
     // if context was locked inside timed_mutex::try_lock_until()
     // push active context to sleep-queue
     ctx->tp_ = sleep_tp;
-    ctx->sleep_link( sleep_queue_);
+    {
+        detail::spinlock_lock lk{ sleep_splk_ };
+        BOOST_ASSERT( nullptr == ctx->sleep_splk_);
+        ctx->sleep_link( sleep_queue_);
+        ctx->sleep_splk_ = & sleep_splk_;
+    }
     // resume another context
     algo_->pick_next()->resume( lk);
     // context has been resumed

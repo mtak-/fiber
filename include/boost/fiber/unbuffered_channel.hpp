@@ -235,6 +235,9 @@ public:
                     waiting_consumers_.pop_front();
                     active_ctx->schedule( consumer_ctx);
                 }
+                BOOST_ASSERT( nullptr == active_ctx->wait_splk_);
+                BOOST_ASSERT( nullptr == active_ctx->sleep_splk_);
+                active_ctx->wait_splk_ = & splk_consumers_;
                 // suspend this producer
                 if ( ! active_ctx->wait_until( timeout_time, lk) ) {
                     // clear slot
@@ -253,7 +256,10 @@ public:
                 if ( is_empty_() ) {
                     continue;
                 }
+                BOOST_ASSERT( nullptr == active_ctx->wait_splk_);
+                BOOST_ASSERT( nullptr == active_ctx->sleep_splk_);
                 active_ctx->wait_link( waiting_producers_);
+                active_ctx->wait_splk_ = & splk_producers_;
                 // suspend this producer
                 if ( ! active_ctx->wait_until( timeout_time, lk) ) {
                     // relock local lk
@@ -285,6 +291,9 @@ public:
                     waiting_consumers_.pop_front();
                     active_ctx->schedule( consumer_ctx);
                 }
+                BOOST_ASSERT( nullptr == active_ctx->wait_splk_);
+                BOOST_ASSERT( nullptr == active_ctx->sleep_splk_);
+                active_ctx->wait_splk_ = & splk_consumers_;
                 // suspend this producer
                 if ( ! active_ctx->wait_until( timeout_time, lk) ) {
                     // clear slot
@@ -303,7 +312,10 @@ public:
                 if ( is_empty_() ) {
                     continue;
                 }
+                BOOST_ASSERT( nullptr == active_ctx->wait_splk_);
+                BOOST_ASSERT( nullptr == active_ctx->sleep_splk_);
                 active_ctx->wait_link( waiting_producers_);
+                active_ctx->wait_splk_ = & splk_producers_;
                 // suspend this producer
                 if ( ! active_ctx->wait_until( timeout_time, lk) ) {
                     // relock local lk
@@ -429,7 +441,10 @@ public:
                 if ( ! is_empty_() ) {
                     continue;
                 }
+                BOOST_ASSERT( nullptr == active_ctx->wait_splk_);
+                BOOST_ASSERT( nullptr == active_ctx->sleep_splk_);
                 active_ctx->wait_link( waiting_consumers_);
+                active_ctx->wait_splk_ = & splk_consumers_;
                 // suspend this consumer
                 if ( ! active_ctx->wait_until( timeout_time, lk) ) {
                     // relock local lk

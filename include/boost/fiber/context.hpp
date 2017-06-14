@@ -188,7 +188,11 @@ private:
     boost::context::continuation                        c_{};
     type                                                type_;
     launch                                              policy_;
+public:
+    detail::spinlock                                *   wait_splk_{ nullptr };
+    detail::spinlock                                *   sleep_splk_{ nullptr };
 
+private:
     context( std::size_t initial_count, type t, launch policy) noexcept :
         use_count_{ initial_count },
         type_{ t },

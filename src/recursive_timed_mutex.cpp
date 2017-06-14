@@ -37,7 +37,10 @@ recursive_timed_mutex::try_lock_until_( std::chrono::steady_clock::time_point co
             return true;
         }
         BOOST_ASSERT( ! active_ctx->wait_is_linked() );
+        BOOST_ASSERT( nullptr == active_ctx->wait_splk_);
+        BOOST_ASSERT( nullptr == active_ctx->sleep_splk_);
         active_ctx->wait_link( wait_queue_);
+        active_ctx->wait_splk_ = & wait_queue_splk_;
         // suspend this fiber until notified or timed-out
         if ( ! active_ctx->wait_until( timeout_time, lk) ) {
             // remove fiber from wait-queue 
@@ -90,19 +93,32 @@ recursive_timed_mutex::try_lock() noexcept {
 void
 recursive_timed_mutex::unlock() {
     context * active_ctx = context::active();
+loop:
     detail::spinlock_lock lk{ wait_queue_splk_ };
     if ( BOOST_UNLIKELY( active_ctx != owner_) ) {
         throw lock_error{
                 std::make_error_code( std::errc::operation_not_permitted),
                 "boost fiber: no  privilege to perform the operation" };
     }
-    if ( 0 == --count_) {
-        owner_ = nullptr;
+    if ( 1 == count_) {
         if ( ! wait_queue_.empty() ) {
             context * ctx = & wait_queue_.front();
+            if ( nullptr != ctx->wait_splk_) {
+                BOOST_ASSERT( nullptr != ctx->sleep_splk_);
+                BOOST_ASSERT( & wait_queue_splk_ == ctx->wait_splk_);
+                if ( ! ctx->sleep_splk_->try_lock() ) {
+                    lk.unlock();
+                    goto loop;
+                }
+                ctx->sleep_unlink();
+                ctx->sleep_splk_ = nullptr;
+                ctx->wait_splk_ = nullptr;
+            }
             wait_queue_.pop_front();
             active_ctx->schedule( ctx);
         }
+        owner_ = nullptr;
+        --count_;
     }
 }
 
