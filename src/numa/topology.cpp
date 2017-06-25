@@ -13,7 +13,7 @@
 #endif
 
 namespace boost {
-namespace fibes {
+namespace fibers {
 namespace numa {
 
 #if BOOST_COMP_CLANG || \
